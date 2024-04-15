@@ -1,161 +1,115 @@
+import express, { Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { Server, StableBTreeMap, ic } from 'azle';
-import express from 'express';
-
-
 
 class ToDoList {
    id: string;
    description: string;
    task: string;
    priority: number;
-   labels: [];
+   labels: string[];
    createdAt: Date;
-   updatedAt: Date | null
+   updatedAt: Date | null;
 }
-
 
 const listStorage = StableBTreeMap<string, ToDoList>(0);
 
-
 export default Server(() => {
-
    const app = express();
    app.use(express.json());
 
    // Create To do list
-   app.post("/tasks", (req, res) => {
-
-      const list: ToDoList =  {id: uuidv4(), createdAt: getCurrentDate(), ...req.body};
+   app.post("/tasks", (req: Request, res: Response) => {
+      const { description, task, priority, labels }: ToDoList = req.body;
       
-      // Check for bad data types
-      if((typeof list.description !== 'string' || list.description.trim() === '') || (typeof list.task !== 'string' || list.task.trim() === '') || (typeof list.priority !== 'number' || list.priority < 0)){
-         res.send("Bad request, check data types!")
+      // Check for bad data types and empty strings
+      if (!description || !task || !priority || typeof description !== 'string' || typeof task !== 'string' || typeof priority !== 'number') {
+         return res.status(400).send("Bad request: Check data types and required fields!");
       }
-      else if(list.labels.some(item => typeof item !== 'string')){
-         res.send("Bad request, check labels types!")
+      
+      // Ensure labels is an array of strings
+      if (!Array.isArray(labels) || labels.some(label => typeof label !== 'string')) {
+         return res.status(400).send("Bad request: Labels must be an array of strings!");
       }
-      else{
-         listStorage.insert(list.id, list);
-         res.json(list);
-      }
+
+      const list: ToDoList = { id: uuidv4(), createdAt: getCurrentDate(), ...req.body };
+      listStorage.insert(list.id, list);
+      res.json(list);
    });
 
    // Get all tasks
-  app.get("/tasks", (req, res) => {
+   app.get("/tasks", (_: Request, res: Response) => {
       res.json(listStorage.values());
-  });
-  
-  // Get all tasks sorted by priority
-  app.get("/tasks/sorted", (req, res) => {
-      const sortedValues = listStorage.values().sort((a, b) => {
-         return a.priority - b.priority;
-      });
-      res.json(sortedValues)
    });
 
-  // Get tasks by labels (sorted)
-  app.get("/tasks/labels/:labels", (req, res) => {
+   // Get all tasks sorted by priority
+   app.get("/tasks/sorted", (_: Request, res: Response) => {
+      const sortedValues = listStorage.values().sort((a, b) => a.priority - b.priority);
+      res.json(sortedValues);
+   });
+
+   // Get tasks by labels (sorted)
+   app.get("/tasks/labels/:labels", (req: Request, res: Response) => {
       const taskLabels = req.params.labels.split(',');
-
-      const filteredTasks = listStorage.values().filter((task) => {
-         return task.labels.some(label => taskLabels.includes(label));
-     });
-      const sortedValues = filteredTasks.sort((a, b) => {
-         return a.priority - b.priority;
-      });
-     res.json(sortedValues)
+      const filteredTasks = listStorage.values().filter(task => task.labels.some(label => taskLabels.includes(label)));
+      const sortedValues = filteredTasks.sort((a, b) => a.priority - b.priority);
+      res.json(sortedValues);
    });
 
-  // Get specific task
-  app.get("/tasks/id/:id", (req, res) => {
-
+   // Get specific task
+   app.get("/tasks/id/:id", (req: Request, res: Response) => {
       const taskId = req.params.id;
-      const taskOpt = listStorage.get(taskId);
-
-      if ("None" in taskOpt) {
-         res.status(404).send(`the message with id=${taskId} not found`);
-      } else {
-         res.json(taskOpt.Some);
+      const task = listStorage.get(taskId);
+      if (!task) {
+         return res.status(404).send(`Task with id ${taskId} not found!`);
       }
+      res.json(task);
    });
 
    // Update task
-   app.put("/tasks/id/:id", (req, res) => {
-
+   app.put("/tasks/id/:id", (req: Request, res: Response) => {
       const taskId = req.params.id;
-      const taskOpt = listStorage.get(taskId);
-   
-      if ("None" in taskOpt) {
-         res.status(400).send(`couldn't update a message with id=${taskId}. message not found`);
-      } else {
-   
-         const task = taskOpt.Some;
-         const updatedMessage = { ...task, ...req.body, updatedAt: getCurrentDate()};
-
-         listStorage.insert(task.id, updatedMessage);
-   
-         res.json(updatedMessage);
+      const task = listStorage.get(taskId);
+      if (!task) {
+         return res.status(404).send(`Task with id ${taskId} not found!`);
       }
+      const updatedTask = { ...task, ...req.body, updatedAt: getCurrentDate() };
+      listStorage.insert(taskId, updatedTask);
+      res.json(updatedTask);
    });
 
    // Delete task
-   app.delete("/tasks/id/:id", (req, res) => {
-
+   app.delete("/tasks/id/:id", (req: Request, res: Response) => {
       const taskId = req.params.id;
       const deletedTask = listStorage.remove(taskId);
-   
-      if ("None" in deletedTask) {
-         res.status(400).send(`couldn't delete a message with id=${taskId}. message not found`);
-      } else {
-         res.json(deletedTask.Some);
+      if (!deletedTask) {
+         return res.status(404).send(`Task with id ${taskId} not found!`);
       }
+      res.json(deletedTask);
    });
 
    // Delete tasks by label
-   app.delete("/tasks/labels/:label", (req, res) => {
+   app.delete("/tasks/labels/:label", (req: Request, res: Response) => {
       const labelToRemove = req.params.label;
-  
-      const updatedTasks = listStorage.values().filter(task => !task.labels.some(label => label === labelToRemove))
-      const isLabelUsed = updatedTasks.length !== listStorage.values().length;
-
-      if(isLabelUsed){
-         const keys = listStorage.keys();
-         keys.forEach((key) => {
-            listStorage.remove(key);
-         });
-     
-         // Insert updated tasks into the list
-         updatedTasks.forEach(task => listStorage.insert(task.id, task));
-     
-         res.json(listStorage.values());
+      const updatedTasks = listStorage.values().filter(task => !task.labels.includes(labelToRemove));
+      if (updatedTasks.length === listStorage.size()) {
+         return res.status(404).send(`No tasks with label ${labelToRemove} found!`);
       }
-      else{
-         res.send(`No tasks with ${labelToRemove} label!`);
-      }
-  });
+      listStorage.clear();
+      updatedTasks.forEach(task => listStorage.insert(task.id, task));
+      res.json(listStorage.values());
+   });
 
    // Delete all tasks
-   app.delete("/tasks", (req, res) => {
-
-    const keys = listStorage.keys();
-
-    keys.forEach((key) => {
-        listStorage.remove(key);
-    });
-
-    res.send("All tasks deleted!");
+   app.delete("/tasks", (_: Request, res: Response) => {
+      listStorage.clear();
+      res.send("All tasks deleted!");
    });
 
    return app.listen();
-
 });
 
-
-function getCurrentDate() {
-
+function getCurrentDate(): Date {
    const timestamp = new Number(ic.time());
-
    return new Date(timestamp.valueOf() / 1000_000);
-
 }
