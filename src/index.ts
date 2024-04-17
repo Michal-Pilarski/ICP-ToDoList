@@ -106,10 +106,52 @@ export default Server(() => {
       res.send("All tasks deleted!");
    });
 
+   // Update task priority
+   app.put("/tasks/priority/:id", (req: Request, res: Response) => {
+      const taskId = req.params.id;
+      const newPriority = req.body.priority;
+
+      if (typeof newPriority !== 'number') {
+         return res.status(400).send("Bad request: Priority must be a number!");
+      }
+
+      const task = listStorage.get(taskId);
+      if (!task) {
+         return res.status(404).send(`Task with id ${taskId} not found!`);
+      }
+      const updatedTask = { ...task, priority: newPriority, updatedAt: getCurrentDate() };
+      listStorage.insert(taskId, updatedTask);
+      res.json(updatedTask);
+   });
+
+   // Search tasks by description
+   app.get("/tasks/search/:description", (req: Request, res: Response) => {
+      const description = req.params.description;
+      const filteredTasks = listStorage.values().filter(task => task.description.toLowerCase().includes(description.toLowerCase()));
+      res.json(filteredTasks);
+   });
+
+   // Count tasks by label
+   app.get("/tasks/labels/count/:label", (req: Request, res: Response) => {
+      const labelToCount = req.params.label;
+      const count = listStorage.values().reduce((acc, task) => acc + (task.labels.includes(labelToCount) ? 1 : 0), 0);
+      res.json({ label: labelToCount, count });
+   });
+
+   // Get tasks created after a certain date
+   app.get("/tasks/created-after/:date", (req: Request, res: Response) => {
+      const dateParam = new Date(req.params.date);
+      if (isNaN(dateParam.getTime())) {
+         return res.status(400).send("Bad request: Invalid date format!");
+      }
+      const filteredTasks = listStorage.values().filter(task => task.createdAt > dateParam);
+      res.json(filteredTasks);
+   });
+
    return app.listen();
 });
 
 function getCurrentDate(): Date {
-   const timestamp = new Number(ic.time());
-   return new Date(timestamp.valueOf() / 1000_000);
+   const timestamp = ic.time();
+   return new Date(timestamp / 1000000);
 }
